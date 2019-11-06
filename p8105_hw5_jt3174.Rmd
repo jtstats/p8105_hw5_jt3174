@@ -15,7 +15,6 @@ set.seed(1)
 library(tidyverse)
 library(viridis)
 library(ggridges)
-library(patchwork)
 
 knitr::opts_chunk$set(
   # display the code in the code truck above its results in the final document
@@ -82,27 +81,50 @@ filling = function(column) {
 # use map to iterate over each variable of the dataframe iris_with_missing with filling function that I just wrote above and return a dataframe called iris_filled
 iris_filled = map_df(iris_with_missing, filling)
 
+iris_filled
+
 ```
 
 # Problem 2
 
-```{r read data, message = FALSE}
+```{r read and tidy data through nest, message = FALSE}
 
 # vector for pathes of files
-path = list.files(path = "./data/", full.names = TRUE)
+path = list.files(path = "./data/", full.names = TRUE) %>% 
+  # make this vector a dataframe
+  as.data.frame() %>% 
+  # give the data a name "file_id"
+  rename("file_id" = ".") %>% 
+  # make the fild_id a character instead of a factor
+  mutate(file_id = as.character(file_id))
 
-# function for paths of files to be read and combined
-read_and_combine = function(x) {
-  data = read_csv(x)
-  cbind(file_id = x, data)
-}
+# create a list (here would be nested) that stores all data in this study
+arm_study_nest = path %>% 
+  # add a column called data for each subject
+  mutate("data" = purrr::map(.x = pull(., file_id), read_csv))
 
-# read data
-arm_study = purrr::map_df(path, read_and_combine) %>% 
-  # get rid of the same ./data/ in the beginning
+# tidy data
+arm_study = arm_study_nest %>% 
+  # get rid of the same ./data/ in the beginning and .csv in the end
   mutate(file_id = str_extract(file_id, "[conexp]{3}_[0-9]{2}")) %>% 
+  # unnest the data
+  unnest() %>% 
   # to get two columns: subject ID and arm
   separate(file_id, into = c("arm", "subject_id"), sep = "_") %>% 
+  # tidy weekly observation
+  pivot_longer(
+    # for columns week_1 to week_8
+    cols = week_1:week_8,
+    # put the variable names "week_1" etc. to a new column called week
+    names_to = "week",
+    # put the values of old weekly observation data to a new column called "weekly_observation"
+    values_to = "weekly_observation",
+    # get rid of the predix of week_ in the week column
+    names_prefix = "week_"
+  ) %>% 
+  # make subject_id a factor
+  mutate(subject_id = as.factor(subject_id),
+         arm = as.factor(arm)) %>% 
   # reorder the variables
   select(subject_id, arm, everything())
 
@@ -110,4 +132,27 @@ arm_study
 
 ```
 
+```{r spaghetti plot}
+
+arm_study %>% 
+  # x-axis is week, y-axis is the weekly observation and color by subject_id to show for each subject the weekly observation over time.
+  ggplot(aes(x = week, y = weekly_observation, group = subject_id)) +
+  # spaghetti plot, divide the group by arm to make sure that we have con_1 and exp_1 since they both have the same subject ID
+  geom_line(aes(color = subject_id)) +
+  # separate control group from experimental group
+  facet_grid( . ~ arm, 
+              # label each facet plot more explicitly
+             labeller = labeller(arm = c('con' = "Control Group", 'exp' = "Experimental Group"))) +
+  # label the subject_id more explicity
+  scale_color_discrete("Subject ID") +
+  # give nice labels and captions to our plot
+  labs(title = "Spaghetti Plot for Arm Study Over Time in Different Groups",
+       x = "Week",
+       y = "Weekly Obeservation",
+       caption = "Data provided by Jeff"
+  )
+  
+```
+
+Comment: According to the plot above, we can see that the starting week observation between two groups are roughly the same, but as the time proceeded, we can see that the experimental group's weekly observation started to go up while the control group are roughly staying at the same places where they started.
 
